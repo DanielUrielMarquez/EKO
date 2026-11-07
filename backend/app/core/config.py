@@ -1,6 +1,6 @@
-
 from pathlib import Path
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     # Aplicación
     LOG_LEVEL: str = "INFO"
     ENVIRONMENT: str = "development"
+
+    # Inteligencia artificial
+    GROQ_API_KEY: SecretStr | None = None
+    GROQ_MODEL: str = "openai/gpt-oss-20b"
 
     model_config = SettingsConfigDict(
         env_file=ROOT_DIR / ".env",
