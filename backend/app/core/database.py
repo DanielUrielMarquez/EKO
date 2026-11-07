@@ -1,29 +1,9 @@
-from pathlib import Path
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import create_engine
 from sqlalchemy.engine import URL
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
-
-# Ubicación del archivo .env en la raíz de EKO
-ROOT_DIR = Path(__file__).resolve().parents[3]
-
-
-class Settings(BaseSettings):
-    POSTGRES_DB: str
-    POSTGRES_USER: str
-    POSTGRES_PASSWORD: str
-    POSTGRES_PORT: int = 5433
-
-    model_config = SettingsConfigDict(
-        env_file=ROOT_DIR / ".env",
-        env_file_encoding="utf-8",
-        extra="ignore",
-    )
-
-
-settings = Settings()
+from app.core.config import settings
 
 
 # Construcción segura de la URL de conexión

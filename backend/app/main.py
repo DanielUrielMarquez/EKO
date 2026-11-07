@@ -3,9 +3,12 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from app.api.routes.chat import router as chat_router
 from app.core.exceptions import register_exception_handlers
+from app.core.logging_config import setup_logging
+
 
 from app.core.database import engine
 
+setup_logging()
 
 app = FastAPI(
     title="EKO",
