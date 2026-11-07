@@ -1,12 +1,13 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
+
 from app.api.routes.chat import router as chat_router
+from app.core.database import get_db
 from app.core.exceptions import register_exception_handlers
 from app.core.logging_config import setup_logging
 
-
-from app.core.database import engine
 
 setup_logging()
 
@@ -36,10 +37,9 @@ def health_check():
 
 
 @app.get("/health/db")
-def database_health_check():
+def database_health_check(db: Session = Depends(get_db)):
     try:
-        with engine.connect() as connection:
-            connection.execute(text("SELECT 1"))
+        db.execute(text("SELECT 1"))
 
         return {
             "status": "ok",

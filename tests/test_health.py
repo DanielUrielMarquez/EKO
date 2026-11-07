@@ -25,3 +25,26 @@ def test_database_health():
 
     assert response.status_code == 200
     assert response.json()["database"] == "connected"
+
+
+def test_database_session_is_closed(monkeypatch):
+    class FakeSession:
+        closed = False
+
+        def execute(self, query):
+            return None
+
+        def close(self):
+            self.closed = True
+
+    fake_db = FakeSession()
+
+    monkeypatch.setattr(
+        "app.core.database.SessionLocal",
+        lambda: fake_db,
+    )
+
+    response = client.get("/health/db")
+
+    assert response.status_code == 200
+    assert fake_db.closed is True
