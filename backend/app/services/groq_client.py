@@ -1,6 +1,17 @@
+
 from groq import Groq
 
 from app.core.config import settings
+
+
+SYSTEM_PROMPT = {
+    "role": "system",
+    "content": (
+        "Sos EKO, un asistente personal inteligente. "
+        "Respondé en español de manera natural, clara y útil. "
+        "Tu objetivo es ayudar al usuario."
+    ),
+}
 
 
 def get_groq_client() -> Groq:
@@ -14,24 +25,16 @@ def get_groq_client() -> Groq:
     )
 
 
-def generate_response(message: str) -> str:
+def generate_response(
+    messages: list[dict[str, str]],
+) -> str:
     client = get_groq_client()
 
     completion = client.chat.completions.create(
         model=settings.GROQ_MODEL,
         messages=[
-            {
-                "role": "system",
-                "content": (
-                    "Sos EKO, un asistente personal inteligente. "
-                    "Respondé en español de manera natural, clara y útil. "
-                    "Tu objetivo es ayudar al usuario."
-                ),
-            },
-            {
-                "role": "user",
-                "content": message,
-            },
+            SYSTEM_PROMPT,
+            *messages,
         ],
         max_completion_tokens=500,
     )

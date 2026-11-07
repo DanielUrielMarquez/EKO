@@ -8,6 +8,12 @@ class ChatRequest(BaseModel):
         description="Mensaje enviado por el usuario",
     )
 
+    conversation_id: int | None = Field(
+        default=None,
+        gt=0,
+        description="Identificador de la conversación existente",
+    )
+
     @field_validator("message")
     @classmethod
     def validate_message(cls, value: str) -> str:
@@ -22,3 +28,4 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     response: str
     assistant: str = "EKO"
+    conversation_id: int
