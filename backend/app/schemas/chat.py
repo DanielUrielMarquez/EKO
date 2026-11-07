@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class ChatRequest(BaseModel):
@@ -7,6 +7,16 @@ class ChatRequest(BaseModel):
         max_length=2000,
         description="Mensaje enviado por el usuario",
     )
+
+    @field_validator("message")
+    @classmethod
+    def validate_message(cls, value: str) -> str:
+        value = value.strip()
+
+        if not value:
+            raise ValueError("El mensaje no puede estar vacío.")
+
+        return value
 
 
 class ChatResponse(BaseModel):

@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from app.api.routes.chat import router as chat_router
+from app.core.exceptions import register_exception_handlers
 
 from app.core.database import engine
 
@@ -11,6 +12,7 @@ app = FastAPI(
     description="Entorno de Knowledge Operativo",
     version="0.1.0",
 )
+register_exception_handlers(app)
 app.include_router(chat_router)
 
 @app.get("/")
