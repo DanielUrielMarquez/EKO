@@ -176,3 +176,57 @@ def test_chat_conversation_not_found(client_with_db):
     assert response.json()["detail"] == (
         "La conversación solicitada no existe."
     )
+
+
+def test_chat_history_limit(db_session):
+    from app.services.chat_service import (
+        MAX_HISTORY_MESSAGES,
+        process_message,
+    )
+
+    conversation = Conversation(title="Conversación extensa")
+    db_session.add(conversation)
+    db_session.flush()
+
+    # Crear 30 mensajes anteriores.
+    for i in range(30):
+        db_session.add(
+            Message(
+                conversation_id=conversation.id,
+                role="user" if i % 2 == 0 else "assistant",
+                content=f"Mensaje {i + 1}",
+            )
+        )
+
+    db_session.commit()
+
+    with patch(
+        "app.services.chat_service.generate_response",
+        return_value="Respuesta de EKO",
+    ) as mock_generate:
+        process_message(
+            db=db_session,
+            message="Mensaje nuevo",
+            conversation_id=conversation.id,
+        )
+
+    received_history = mock_generate.call_args.args[0]
+
+    # Debe recibir 20 mensajes anteriores y el mensaje actual.
+    assert len(received_history) == MAX_HISTORY_MESSAGES + 1
+
+    # Debe comenzar en el mensaje 11 y terminar con el nuevo.
+    assert received_history[0]["content"] == "Mensaje 11"
+    assert received_history[-2]["content"] == "Mensaje 30"
+    assert received_history[-1] == {
+        "role": "user",
+        "content": "Mensaje nuevo",
+    }
+
+    # Todos los mensajes anteriores deben seguir guardados.
+    saved_messages = db_session.scalars(
+        select(Message)
+        .where(Message.conversation_id == conversation.id)
+    ).all()
+
+    assert len(saved_messages) == 32

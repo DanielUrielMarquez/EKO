@@ -1,9 +1,15 @@
+
+from datetime import datetime, timezone
+
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.models import Conversation, Message
 from app.services.groq_client import generate_response
+
+
+MAX_HISTORY_MESSAGES = 20
 
 
 def process_message(
@@ -24,7 +30,8 @@ def process_message(
             if conversation is None:
                 raise HTTPException(
                     status_code=404,
-                    detail="La conversación solicitada no existe.",)
+                    detail="La conversación solicitada no existe.",
+                )
         else:
             conversation = Conversation(
                 title=normalized_message[:100],
@@ -32,24 +39,29 @@ def process_message(
             db.add(conversation)
             db.flush()
 
-        # Recuperar el historial anterior.
+        # Recuperar solamente los últimos mensajes.
         statement = (
             select(Message)
             .where(Message.conversation_id == conversation.id)
-            .order_by(Message.created_at, Message.id)
+            .order_by(
+                Message.created_at.desc(),
+                Message.id.desc(),
+            )
+            .limit(MAX_HISTORY_MESSAGES)
         )
 
         previous_messages = db.scalars(statement).all()
 
+        # Reordenar el historial cronológicamente.
         history = [
             {
                 "role": item.role,
                 "content": item.content,
             }
-            for item in previous_messages
+            for item in reversed(previous_messages)
         ]
 
-        # Incorporar el mensaje actual para enviarlo a Groq.
+        # Incorporar el mensaje actual.
         history.append({
             "role": "user",
             "content": normalized_message,
@@ -72,8 +84,6 @@ def process_message(
         ])
 
         # Actualizar la fecha de modificación.
-        from datetime import datetime, timezone
-
         conversation.updated_at = datetime.now(timezone.utc)
 
         db.commit()
