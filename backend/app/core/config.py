@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
     ENVIRONMENT: str = "development"
 
+    # Seguridad
+    JWT_SECRET_KEY: SecretStr
+    JWT_ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+
     # Inteligencia artificial
     GROQ_API_KEY: SecretStr | None = None
     GROQ_MODEL: str = "openai/gpt-oss-20b"

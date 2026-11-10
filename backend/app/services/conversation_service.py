@@ -1,13 +1,16 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from app.models import Conversation
 
-from app.models import Conversation, message
 
-
-def list_conversations(db: Session) -> list[Conversation]:
+def list_conversations(
+    db: Session,
+    user_id: int,
+) -> list[Conversation]:
     statement = (
         select(Conversation)
+        .where(Conversation.user_id == user_id)
         .order_by(
             Conversation.updated_at.desc(),
             Conversation.id.desc(),
@@ -20,11 +23,15 @@ def list_conversations(db: Session) -> list[Conversation]:
 def get_conversation(
     db: Session,
     conversation_id: int,
+    user_id: int,
 ) -> Conversation | None:
     statement = (
         select(Conversation)
         .options(selectinload(Conversation.messages))
-        .where(Conversation.id == conversation_id)
+        .where(
+            Conversation.id == conversation_id,
+            Conversation.user_id == user_id,
+        )
     )
 
     conversation = db.scalars(statement).first()

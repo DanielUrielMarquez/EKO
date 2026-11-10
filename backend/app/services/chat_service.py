@@ -83,6 +83,7 @@ def update_conversation_summary(
 def process_message(
     db: Session,
     message: str,
+    user_id: int,
     conversation_id: int | None = None,
 ) -> tuple[str, int]:
     normalized_message = message.strip()
@@ -93,7 +94,11 @@ def process_message(
     try:
         # Buscar una conversación existente o crear una nueva.
         if conversation_id is not None:
-            conversation = db.get(Conversation, conversation_id)
+            statement = select(Conversation).where(
+                Conversation.id == conversation_id,
+                Conversation.user_id == user_id,
+            )
+            conversation = db.scalar(statement)
 
             if conversation is None:
                 raise HTTPException(
@@ -103,6 +108,7 @@ def process_message(
         else:
             conversation = Conversation(
                 title=normalized_message[:100],
+		user_id=user_id,
             )
             db.add(conversation)
             db.flush()

@@ -6,8 +6,10 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core.database import Base, get_db
+from app.core.tokens import create_access_token
 from app.main import app
-from app.models import Conversation, Message
+from app.models import Conversation, Message, User
+from app.core.security import hash_password
 
 
 @pytest.fixture
@@ -34,6 +36,30 @@ def db_session():
         db.close()
         Base.metadata.drop_all(bind=engine)
         engine.dispose()
+
+
+@pytest.fixture
+def test_user(db_session):
+    user = User(
+        email="eko@example.com",
+        hashed_password=hash_password("clave-segura-123"),
+        is_active=True,
+    )
+
+    db_session.add(user)
+    db_session.commit()
+    db_session.refresh(user)
+
+    return user
+
+
+@pytest.fixture
+def auth_headers(test_user):
+    token = create_access_token(test_user.id)
+
+    return {
+        "Authorization": f"Bearer {token}",
+    }
 
 
 @pytest.fixture

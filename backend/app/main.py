@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException, Depends
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
+from app.api.routes.auth import router as auth_router
 
 from app.api.routes.chat import router as chat_router
 from app.core.database import get_db
@@ -18,6 +19,7 @@ app = FastAPI(
 )
 register_exception_handlers(app)
 app.include_router(chat_router)
+app.include_router(auth_router)
 
 @app.get("/")
 def root():

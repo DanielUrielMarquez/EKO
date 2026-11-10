@@ -1,3 +1,4 @@
+
 from unittest.mock import patch
 
 import pytest
@@ -13,10 +14,10 @@ from app.models import Conversation, Message
         ("¿Qué puedes hacer?", "Puedo ayudarte con muchas tareas."),
     ],
 )
-def test_chat_success(client_with_db, db_session, message, expected_response):
-    expected_history = [
-        {"role": "user", "content": message},
-    ]
+def test_chat_success(client_with_db, db_session, test_user, auth_headers, message, expected_response):
+    from app.services.chat_service import generate_response
+
+    expected_history = [{"role": "user", "content": message}]
 
     with patch(
         "app.services.chat_service.generate_response",
@@ -25,21 +26,18 @@ def test_chat_success(client_with_db, db_session, message, expected_response):
         response = client_with_db.post(
             "/chat/",
             json={"message": message},
+            headers=auth_headers,
         )
 
     assert response.status_code == 200
     assert response.json()["assistant"] == "EKO"
     assert response.json()["response"] == expected_response
     assert response.json()["conversation_id"] > 0
-
     mock_generate.assert_called_once_with(expected_history)
 
-    conversation = db_session.get(
-        Conversation,
-        response.json()["conversation_id"],
-    )
-
+    conversation = db_session.get(Conversation, response.json()["conversation_id"])
     assert conversation is not None
+    assert conversation.user_id == test_user.id
     assert conversation.title == message[:100]
 
     messages = db_session.scalars(
@@ -55,10 +53,11 @@ def test_chat_success(client_with_db, db_session, message, expected_response):
     assert messages[1].content == expected_response
 
 
-def test_chat_empty_message(client_with_db):
+def test_chat_empty_message(client_with_db, auth_headers):
     response = client_with_db.post(
         "/chat/",
         json={"message": ""},
+        headers=auth_headers,
     )
 
     assert response.status_code == 422
@@ -68,10 +67,11 @@ def test_chat_empty_message(client_with_db):
     assert "input" not in response.text
 
 
-def test_chat_whitespace_message(client_with_db):
+def test_chat_whitespace_message(client_with_db, auth_headers):
     response = client_with_db.post(
         "/chat/",
         json={"message": "   "},
+        headers=auth_headers,
     )
 
     assert response.status_code == 422
@@ -80,10 +80,11 @@ def test_chat_whitespace_message(client_with_db):
     assert response.json()["details"][0]["message"] == "El mensaje no puede estar vacío."
 
 
-def test_chat_missing_message(client_with_db):
+def test_chat_missing_message(client_with_db, auth_headers):
     response = client_with_db.post(
         "/chat/",
         json={},
+        headers=auth_headers,
     )
 
     assert response.status_code == 422
@@ -92,10 +93,11 @@ def test_chat_missing_message(client_with_db):
     assert response.json()["details"][0]["message"] == "El campo es obligatorio."
 
 
-def test_chat_message_too_long(client_with_db):
+def test_chat_message_too_long(client_with_db, auth_headers):
     response = client_with_db.post(
         "/chat/",
         json={"message": "a" * 2001},
+        headers=auth_headers,
     )
 
     assert response.status_code == 422
@@ -104,7 +106,7 @@ def test_chat_message_too_long(client_with_db):
     assert response.json()["details"][0]["message"] == "El mensaje supera el máximo de 2000 caracteres."
 
 
-def test_chat_conversation_history(client_with_db):
+def test_chat_conversation_history(client_with_db, auth_headers):
     with patch(
         "app.services.chat_service.generate_response",
         side_effect=[
@@ -112,10 +114,10 @@ def test_chat_conversation_history(client_with_db):
             "Te llamás Uriel.",
         ],
     ) as mock_generate:
-
         first_response = client_with_db.post(
             "/chat/",
             json={"message": "Me llamo Uriel"},
+            headers=auth_headers,
         )
 
         conversation_id = first_response.json()["conversation_id"]
@@ -126,11 +128,11 @@ def test_chat_conversation_history(client_with_db):
                 "message": "¿Cómo me llamo?",
                 "conversation_id": conversation_id,
             },
+            headers=auth_headers,
         )
 
     assert first_response.status_code == 200
     assert second_response.status_code == 200
-
     assert second_response.json()["response"] == "Te llamás Uriel."
     assert second_response.json()["conversation_id"] == conversation_id
 
@@ -144,7 +146,7 @@ def test_chat_conversation_history(client_with_db):
     assert mock_generate.call_args_list[1].args[0] == expected_history
 
 
-def test_chat_rollback_when_groq_fails(db_session):
+def test_chat_rollback_when_groq_fails(db_session, test_user):
     from app.services.chat_service import process_message
 
     with patch(
@@ -155,40 +157,37 @@ def test_chat_rollback_when_groq_fails(db_session):
             process_message(
                 db=db_session,
                 message="Hola",
+                user_id=test_user.id,
             )
 
-    conversations = db_session.scalars(
-        select(Conversation)
-    ).all()
-
+    conversations = db_session.scalars(select(Conversation)).all()
     assert conversations == []
 
-def test_chat_conversation_not_found(client_with_db):
+
+def test_chat_conversation_not_found(client_with_db, auth_headers):
     response = client_with_db.post(
         "/chat/",
         json={
             "message": "Hola",
             "conversation_id": 9999,
         },
+        headers=auth_headers,
     )
 
     assert response.status_code == 404
-    assert response.json()["detail"] == (
-        "La conversación solicitada no existe."
+    assert response.json()["detail"] == "La conversación solicitada no existe."
+
+
+def test_chat_history_limit(db_session, test_user):
+    from app.services.chat_service import MAX_HISTORY_MESSAGES, process_message
+
+    conversation = Conversation(
+        title="Conversación extensa",
+        user_id=test_user.id,
     )
-
-
-def test_chat_history_limit(db_session):
-    from app.services.chat_service import (
-        MAX_HISTORY_MESSAGES,
-        process_message,
-    )
-
-    conversation = Conversation(title="Conversación extensa")
     db_session.add(conversation)
     db_session.flush()
 
-    # Crear 30 mensajes anteriores.
     for i in range(30):
         db_session.add(
             Message(
@@ -207,15 +206,13 @@ def test_chat_history_limit(db_session):
         process_message(
             db=db_session,
             message="Mensaje nuevo",
+            user_id=test_user.id,
             conversation_id=conversation.id,
         )
 
     received_history = mock_generate.call_args.args[0]
 
-    # Debe recibir 20 mensajes anteriores y el mensaje actual.
     assert len(received_history) == MAX_HISTORY_MESSAGES + 1
-
-    # Debe comenzar en el mensaje 11 y terminar con el nuevo.
     assert received_history[0]["content"] == "Mensaje 11"
     assert received_history[-2]["content"] == "Mensaje 30"
     assert received_history[-1] == {
@@ -223,13 +220,12 @@ def test_chat_history_limit(db_session):
         "content": "Mensaje nuevo",
     }
 
-    # Todos los mensajes anteriores deben seguir guardados.
     saved_messages = db_session.scalars(
-        select(Message)
-        .where(Message.conversation_id == conversation.id)
+        select(Message).where(Message.conversation_id == conversation.id)
     ).all()
 
     assert len(saved_messages) == 32
+
 
 def test_chat_generates_summary_when_threshold_is_reached(db_session):
     from app.services.chat_service import (
@@ -263,10 +259,7 @@ def test_chat_generates_summary_when_threshold_is_reached(db_session):
 
     conversation = db_session.get(Conversation, conversation.id)
 
-    assert conversation.summary == (
-        "El usuario habló sobre sus proyectos."
-    )
-
+    assert conversation.summary == "El usuario habló sobre sus proyectos."
     assert conversation.summary_through_message_id is not None
 
     messages = db_session.scalars(
@@ -278,7 +271,6 @@ def test_chat_generates_summary_when_threshold_is_reached(db_session):
     assert len(messages) == 40
 
     summarized_count = 40 - SUMMARY_KEEP_RECENT_MESSAGES
-
     mock_summary.assert_called_once()
 
     summarized_messages = mock_summary.call_args.kwargs["new_messages"]
@@ -286,7 +278,6 @@ def test_chat_generates_summary_when_threshold_is_reached(db_session):
     assert len(summarized_messages) == summarized_count
     assert summarized_messages[0]["content"] == "Mensaje 1"
     assert summarized_messages[-1]["content"] == "Mensaje 20"
-
     assert conversation.summary_through_message_id == messages[19].id
 
 
@@ -317,15 +308,17 @@ def test_chat_does_not_generate_summary_below_threshold(db_session):
         )
 
     mock_summary.assert_not_called()
-
     assert conversation.summary is None
     assert conversation.summary_through_message_id is None
 
 
-def test_chat_continues_when_summary_generation_fails(db_session):
+def test_chat_continues_when_summary_generation_fails(db_session, test_user):
     from app.services.chat_service import process_message
 
-    conversation = Conversation(title="Conversación extensa")
+    conversation = Conversation(
+        title="Conversación extensa",
+        user_id=test_user.id,
+    )
     db_session.add(conversation)
     db_session.flush()
 
@@ -353,6 +346,7 @@ def test_chat_continues_when_summary_generation_fails(db_session):
         response, conversation_id = process_message(
             db=db_session,
             message="Nuevo mensaje",
+            user_id=test_user.id,
             conversation_id=conversation.id,
         )
 
@@ -370,14 +364,18 @@ def test_chat_continues_when_summary_generation_fails(db_session):
     assert saved_messages[-1].content == "Respuesta de EKO"
     assert conversation.summary is None
 
-def test_list_conversations(client_with_db, db_session):
-    first = Conversation(title="Primera conversación")
-    second = Conversation(title="Segunda conversación")
+
+def test_list_conversations(client_with_db, db_session, test_user, auth_headers):
+    first = Conversation(title="Primera conversación", user_id=test_user.id)
+    second = Conversation(title="Segunda conversación", user_id=test_user.id)
 
     db_session.add_all([first, second])
     db_session.commit()
 
-    response = client_with_db.get("/chat/conversations")
+    response = client_with_db.get(
+        "/chat/conversations",
+        headers=auth_headers,
+    )
 
     assert response.status_code == 200
 
@@ -388,13 +386,14 @@ def test_list_conversations(client_with_db, db_session):
         "Primera conversación",
         "Segunda conversación",
     }
-
-    # La lista no debe incluir todos los mensajes.
     assert "messages" not in conversations[0]
 
 
-def test_get_conversation_detail(client_with_db, db_session):
-    conversation = Conversation(title="Mi conversación")
+def test_get_conversation_detail(client_with_db, db_session, test_user, auth_headers):
+    conversation = Conversation(
+        title="Mi conversación",
+        user_id=test_user.id,
+    )
     db_session.add(conversation)
     db_session.flush()
 
@@ -414,7 +413,8 @@ def test_get_conversation_detail(client_with_db, db_session):
     db_session.commit()
 
     response = client_with_db.get(
-        f"/chat/conversations/{conversation.id}"
+        f"/chat/conversations/{conversation.id}",
+        headers=auth_headers,
     )
 
     assert response.status_code == 200
@@ -428,10 +428,35 @@ def test_get_conversation_detail(client_with_db, db_session):
     assert data["messages"][1]["content"] == "¡Hola! Soy EKO."
 
 
-def test_get_conversation_not_found(client_with_db):
-    response = client_with_db.get("/chat/conversations/9999")
+def test_get_conversation_not_found(client_with_db, auth_headers):
+    response = client_with_db.get(
+        "/chat/conversations/9999",
+        headers=auth_headers,
+    )
 
     assert response.status_code == 404
-    assert response.json()["detail"] == (
-        "La conversación solicitada no existe."
-    )
+    assert response.json()["detail"] == "La conversación solicitada no existe."
+
+
+def test_chat_requires_authentication(client_with_db):
+    response = client_with_db.post('/chat/', json={'message': 'Hola'})
+    assert response.status_code == 401
+
+def test_list_conversations_requires_authentication(client_with_db):
+    response = client_with_db.get('/chat/conversations')
+    assert response.status_code == 401
+
+def test_get_conversation_requires_authentication(client_with_db):
+    response = client_with_db.get('/chat/conversations/1')
+    assert response.status_code == 401
+
+
+def test_chat_rejects_invalid_token(client_with_db):
+    response = client_with_db.post('/chat/', json={'message': 'Hola'}, headers={'Authorization': 'Bearer token-invalido'})
+    assert response.status_code == 401
+
+def test_chat_rejects_inactive_user(client_with_db, db_session, test_user, auth_headers):
+    test_user.is_active = False
+    db_session.commit()
+    response = client_with_db.post('/chat/', json={'message': 'Hola'}, headers=auth_headers)
+    assert response.status_code == 401
