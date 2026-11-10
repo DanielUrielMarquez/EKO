@@ -230,3 +230,142 @@ def test_chat_history_limit(db_session):
     ).all()
 
     assert len(saved_messages) == 32
+
+def test_chat_generates_summary_when_threshold_is_reached(db_session):
+    from app.services.chat_service import (
+        SUMMARY_KEEP_RECENT_MESSAGES,
+        update_conversation_summary,
+    )
+
+    conversation = Conversation(title="Conversación extensa")
+    db_session.add(conversation)
+    db_session.flush()
+
+    for i in range(40):
+        db_session.add(
+            Message(
+                conversation_id=conversation.id,
+                role="user" if i % 2 == 0 else "assistant",
+                content=f"Mensaje {i + 1}",
+            )
+        )
+
+    db_session.commit()
+
+    with patch(
+        "app.services.chat_service.generate_summary",
+        return_value="El usuario habló sobre sus proyectos.",
+    ) as mock_summary:
+        update_conversation_summary(
+            db=db_session,
+            conversation_id=conversation.id,
+        )
+
+    conversation = db_session.get(Conversation, conversation.id)
+
+    assert conversation.summary == (
+        "El usuario habló sobre sus proyectos."
+    )
+
+    assert conversation.summary_through_message_id is not None
+
+    messages = db_session.scalars(
+        select(Message)
+        .where(Message.conversation_id == conversation.id)
+        .order_by(Message.id)
+    ).all()
+
+    assert len(messages) == 40
+
+    summarized_count = 40 - SUMMARY_KEEP_RECENT_MESSAGES
+
+    mock_summary.assert_called_once()
+
+    summarized_messages = mock_summary.call_args.kwargs["new_messages"]
+
+    assert len(summarized_messages) == summarized_count
+    assert summarized_messages[0]["content"] == "Mensaje 1"
+    assert summarized_messages[-1]["content"] == "Mensaje 20"
+
+    assert conversation.summary_through_message_id == messages[19].id
+
+
+def test_chat_does_not_generate_summary_below_threshold(db_session):
+    from app.services.chat_service import update_conversation_summary
+
+    conversation = Conversation(title="Conversación corta")
+    db_session.add(conversation)
+    db_session.flush()
+
+    for i in range(39):
+        db_session.add(
+            Message(
+                conversation_id=conversation.id,
+                role="user",
+                content=f"Mensaje {i + 1}",
+            )
+        )
+
+    db_session.commit()
+
+    with patch(
+        "app.services.chat_service.generate_summary"
+    ) as mock_summary:
+        update_conversation_summary(
+            db=db_session,
+            conversation_id=conversation.id,
+        )
+
+    mock_summary.assert_not_called()
+
+    assert conversation.summary is None
+    assert conversation.summary_through_message_id is None
+
+
+def test_chat_continues_when_summary_generation_fails(db_session):
+    from app.services.chat_service import process_message
+
+    conversation = Conversation(title="Conversación extensa")
+    db_session.add(conversation)
+    db_session.flush()
+
+    for i in range(38):
+        db_session.add(
+            Message(
+                conversation_id=conversation.id,
+                role="user" if i % 2 == 0 else "assistant",
+                content=f"Mensaje {i + 1}",
+            )
+        )
+
+    db_session.commit()
+
+    with (
+        patch(
+            "app.services.chat_service.generate_response",
+            return_value="Respuesta de EKO",
+        ),
+        patch(
+            "app.services.chat_service.generate_summary",
+            side_effect=RuntimeError("Error simulado de resumen"),
+        ),
+    ):
+        response, conversation_id = process_message(
+            db=db_session,
+            message="Nuevo mensaje",
+            conversation_id=conversation.id,
+        )
+
+    assert response == "Respuesta de EKO"
+    assert conversation_id == conversation.id
+
+    saved_messages = db_session.scalars(
+        select(Message)
+        .where(Message.conversation_id == conversation.id)
+        .order_by(Message.id)
+    ).all()
+
+    assert len(saved_messages) == 40
+    assert saved_messages[-2].content == "Nuevo mensaje"
+    assert saved_messages[-1].content == "Respuesta de EKO"
+    assert conversation.summary is None
