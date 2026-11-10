@@ -369,3 +369,69 @@ def test_chat_continues_when_summary_generation_fails(db_session):
     assert saved_messages[-2].content == "Nuevo mensaje"
     assert saved_messages[-1].content == "Respuesta de EKO"
     assert conversation.summary is None
+
+def test_list_conversations(client_with_db, db_session):
+    first = Conversation(title="Primera conversación")
+    second = Conversation(title="Segunda conversación")
+
+    db_session.add_all([first, second])
+    db_session.commit()
+
+    response = client_with_db.get("/chat/conversations")
+
+    assert response.status_code == 200
+
+    conversations = response.json()
+
+    assert len(conversations) == 2
+    assert {item["title"] for item in conversations} == {
+        "Primera conversación",
+        "Segunda conversación",
+    }
+
+    # La lista no debe incluir todos los mensajes.
+    assert "messages" not in conversations[0]
+
+
+def test_get_conversation_detail(client_with_db, db_session):
+    conversation = Conversation(title="Mi conversación")
+    db_session.add(conversation)
+    db_session.flush()
+
+    db_session.add_all([
+        Message(
+            conversation_id=conversation.id,
+            role="user",
+            content="Hola EKO",
+        ),
+        Message(
+            conversation_id=conversation.id,
+            role="assistant",
+            content="¡Hola! Soy EKO.",
+        ),
+    ])
+
+    db_session.commit()
+
+    response = client_with_db.get(
+        f"/chat/conversations/{conversation.id}"
+    )
+
+    assert response.status_code == 200
+
+    data = response.json()
+
+    assert data["id"] == conversation.id
+    assert data["title"] == "Mi conversación"
+    assert len(data["messages"]) == 2
+    assert data["messages"][0]["content"] == "Hola EKO"
+    assert data["messages"][1]["content"] == "¡Hola! Soy EKO."
+
+
+def test_get_conversation_not_found(client_with_db):
+    response = client_with_db.get("/chat/conversations/9999")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == (
+        "La conversación solicitada no existe."
+    )
