@@ -89,3 +89,61 @@ def test_login_rejects_wrong_password(client_with_db):
     )
 
     assert response.status_code == 401
+def test_login_blocks_after_five_failed_attempts(client_with_db):
+    client_with_db.post("/auth/register", json={"email": "eko@example.com", "password": "clave-segura-123"})
+
+    for _ in range(5):
+        response = client_with_db.post("/auth/login", json={"email": "eko@example.com", "password": "incorrecta"})
+        assert response.status_code == 401
+
+    response = client_with_db.post("/auth/login", json={"email": "eko@example.com", "password": "incorrecta"})
+
+    assert response.status_code == 429
+    assert response.headers["Retry-After"]
+
+
+def test_successful_login_resets_failed_attempts(client_with_db):
+    client_with_db.post("/auth/register", json={"email": "eko@example.com", "password": "clave-segura-123"})
+
+    for _ in range(4):
+        response = client_with_db.post("/auth/login", json={"email": "eko@example.com", "password": "incorrecta"})
+        assert response.status_code == 401
+
+    response = client_with_db.post("/auth/login", json={"email": "eko@example.com", "password": "clave-segura-123"})
+    assert response.status_code == 200
+
+    for _ in range(5):
+        response = client_with_db.post("/auth/login", json={"email": "eko@example.com", "password": "incorrecta"})
+        assert response.status_code == 401
+
+    response = client_with_db.post("/auth/login", json={"email": "eko@example.com", "password": "incorrecta"})
+    assert response.status_code == 429
+
+def test_login_blocks_correct_password_after_limit(client_with_db):
+    client_with_db.post(
+        "/auth/register",
+        json={
+            "email": "eko@example.com",
+            "password": "clave-segura-123",
+        },
+    )
+
+    for _ in range(5):
+        client_with_db.post(
+            "/auth/login",
+            json={
+                "email": "eko@example.com",
+                "password": "incorrecta",
+            },
+        )
+
+    response = client_with_db.post(
+        "/auth/login",
+        json={
+            "email": "eko@example.com",
+            "password": "clave-segura-123",
+        },
+    )
+
+    assert response.status_code == 429
+    assert response.headers["Retry-After"]

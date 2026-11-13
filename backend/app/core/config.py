@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     JWT_SECRET_KEY: SecretStr
     JWT_ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    RATE_LIMIT_LOGIN_ATTEMPTS: int = 5
+    RATE_LIMIT_LOGIN_WINDOW_SECONDS: int = 900
 
     # Inteligencia artificial
     GROQ_API_KEY: SecretStr | None = None

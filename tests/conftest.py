@@ -8,6 +8,7 @@ from sqlalchemy.pool import StaticPool
 from app.core.database import Base, get_db
 from app.core.tokens import create_access_token
 from app.main import app
+from app.api.routes.auth import login_limiter
 from app.models import Conversation, Message, User
 from app.core.security import hash_password
 
@@ -74,3 +75,9 @@ def client_with_db(db_session):
             yield client
     finally:
         app.dependency_overrides.clear()
+
+@pytest.fixture(autouse=True)
+def reset_login_limiter():
+    login_limiter.reset()
+    yield
+    login_limiter.reset()
