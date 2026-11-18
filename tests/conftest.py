@@ -1,3 +1,6 @@
+﻿from datetime import datetime, timedelta, timezone
+from uuid import uuid4
+
 import pytest
 
 from fastapi.testclient import TestClient
@@ -5,11 +8,12 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from app.core.config import settings
 from app.core.database import Base, get_db
 from app.core.tokens import create_access_token
 from app.main import app
 from app.api.routes.auth import login_limiter
-from app.models import Conversation, Message, User
+from app.models import Conversation, Message, User, UserSession
 from app.core.security import hash_password
 
 
@@ -55,8 +59,21 @@ def test_user(db_session):
 
 
 @pytest.fixture
-def auth_headers(test_user):
-    token = create_access_token(test_user.id)
+def auth_headers(test_user, db_session):
+    jti = str(uuid4())
+    expires_at = datetime.now(timezone.utc) + timedelta(
+        minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
+    )
+
+    session = UserSession(
+        jti=jti,
+        user_id=test_user.id,
+        expires_at=expires_at,
+    )
+    db_session.add(session)
+    db_session.commit()
+
+    token = create_access_token(test_user.id, jti, expires_at)
 
     return {
         "Authorization": f"Bearer {token}",
@@ -75,6 +92,7 @@ def client_with_db(db_session):
             yield client
     finally:
         app.dependency_overrides.clear()
+
 
 @pytest.fixture(autouse=True)
 def reset_login_limiter():

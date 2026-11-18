@@ -1,12 +1,18 @@
-﻿from fastapi import APIRouter, Depends, HTTPException, Request, status
+﻿from datetime import datetime, timedelta, timezone
+from uuid import uuid4
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy import func, select, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.dependencies import bearer_scheme, get_current_user
 from app.core.rate_limiter import InMemoryRateLimiter
-from app.core.tokens import create_access_token
-from app.models import User
+from app.core.tokens import create_access_token, decode_access_token
+from app.models import User, UserSession
 from app.schemas.auth import TokenResponse, UserLogin, UserRegister, UserResponse
 from app.services.auth_service import authenticate_user, create_user
 
@@ -75,6 +81,69 @@ def login(
         )
 
     login_limiter.reset_key(client_ip)
-    access_token = create_access_token(user.id)
+
+    jti = str(uuid4())
+    expires_at = datetime.now(timezone.utc) + timedelta(
+        minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES
+    )
+    access_token = create_access_token(user.id, jti, expires_at)
+
+    session = UserSession(
+        jti=jti,
+        user_id=user.id,
+        expires_at=expires_at,
+    )
+    db.add(session)
+
+    try:
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="No se pudo iniciar la sesión.",
+        )
 
     return TokenResponse(access_token=access_token)
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+def logout(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="No autenticado.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    payload = decode_access_token(credentials.credentials)
+    session = db.scalar(
+        select(UserSession).where(
+            UserSession.jti == payload["jti"],
+            UserSession.user_id == current_user.id,
+            UserSession.revoked_at.is_(None),
+        )
+    )
+
+    if session is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="No autenticado.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    session.revoked_at = datetime.now(timezone.utc)
+
+    try:
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="No se pudo cerrar la sesión.",
+        )
+
+    return None
